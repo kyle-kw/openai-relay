@@ -1,0 +1,20 @@
+version: '3.0'
+
+services:
+  openai-log-sync:
+    image: openai-log-sync:0.0.1
+    restart: always
+    environment:
+      INSERT_URL: mysql+pymysql://root:123456@localhost:3306/openai
+      KAFKA_URI: localhost:9092
+      KAFKA_OPENAI_TOPIC: openai-relay-v1
+      KAFKA_GROUP_ID: test-openai-v1
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '10'

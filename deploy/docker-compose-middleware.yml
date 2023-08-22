@@ -1,0 +1,92 @@
+version: '3'
+
+# mysql redis kafka
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: mysql8
+    restart: unless-stopped
+    volumes:
+      - "./mysql/my.cnf:/etc/mysql/my.cnf"
+      - "./mysql/data:/var/lib/mysql"
+      - "./mysql/mysql-files:/var/lib/mysql-files"
+    environment:
+      TZ: Asia/Shanghai
+      LANG: en_US.UTF-8
+      MYSQL_ROOT_PASSWORD: 123456         # 设置root用户密码
+      MYSQL_DATABASE: openai              # 初始化的数据库名称
+    privileged: true
+    user: root
+    ports:
+      - "3306:3306"
+
+  redis:
+    image: redis:7.0.5
+    container_name: redis
+    restart: unless-stopped
+    command: redis-server /etc/redis/redis.conf --requirepass 123456 --appendonly no
+    environment:
+      TZ: Asia/Shanghai
+      LANG: en_US.UTF-8
+    volumes:
+      - "./redis/data:/data"
+      - "./redis/config/redis.conf:/etc/redis/redis.conf"
+    ports:
+      - "6379:6379"
+
+  zookepper:
+    image: bitnami/zookeeper:latest
+    container_name: zookeeper-server
+    restart: unless-stopped
+    volumes:
+      - "/etc/localtime:/etc/localtime"
+    environment:
+      ALLOW_ANONYMOUS_LOGIN: yes
+    ports:
+      - "2181:2181"
+    networks:
+      kafka:
+        ipv4_address: 172.22.6.11
+
+  kafka:
+    image: bitnami/kafka:3.4.1
+    container_name: kafka
+    restart: unless-stopped
+    volumes:
+      - "/etc/localtime:/etc/localtime"
+    environment:
+      ALLOW_PLAINTEXT_LISTENER: yes
+      KAFKA_CFG_ZOOKEEPER_CONNECT: zookepper:2181
+      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://host.docker.internal:9092        # TODO 填写域名或主机IP -- 让客户端能够监听消息  （ host.docker.internal：自动识别主机IP，在Windows或Mac上运行Docker有效 ）
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookepper
+    networks:
+      kafka:
+        ipv4_address: 172.22.6.12
+
+  kafka-map:
+    image: dushixiang/kafka-map:latest
+    container_name: kafka-map
+    restart: unless-stopped
+    volumes:
+      - "./kafka/kafka-map/data:/usr/local/kafka-map/data"
+    environment:
+      DEFAULT_USERNAME: admin
+      DEFAULT_PASSWORD: 123456
+    ports:
+      - "9006:8080"
+    depends_on:
+      - kafka
+    networks:
+      kafka:
+        ipv4_address: 172.22.6.13
+
+networks:
+  kafka:
+    ipam:
+      driver: default
+      config:
+        - subnet: "172.22.6.0/24"
+

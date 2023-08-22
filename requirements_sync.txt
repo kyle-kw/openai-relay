@@ -1,0 +1,6 @@
+-i https://pypi.tuna.tsinghua.edu.cn/simple/
+orjson
+data-stream-kit
+tiktoken
+httpx
+numpy
