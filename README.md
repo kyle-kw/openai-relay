@@ -39,15 +39,8 @@ make
 
 # 若使用已有的服务
 make build
-
 cd deploy
-# 注意修改相关服务的地址
-# 启动代理服务
-docker compose -f docker-compose-relay.yml up -d
-
-# 若不启动此日志，建议将上述的yml中添加`SAVE_LOG: false`环境变量
-# 启动日志异步处理服务
-docker compose -f docker-compose-sync.yml up -d
+docker compose -f docker-compose.yml up -d
 ```
 
 

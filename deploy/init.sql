@@ -1,22 +1,37 @@
+-- docker exec -i mysql-openai mysql -u root -pZ8nVfAqXERe82VwJ openai < ./init.sql
+
 CREATE DATABASE IF NOT EXISTS openai;
 
 use openai;
 
-CREATE TABLE IF NOT EXISTS `auth_forward_api_keys_v2` (
+CREATE TABLE `auth_forward_api_keys_v2` (
   `record_pk` bigint NOT NULL AUTO_INCREMENT,
   `forward_key` varchar(1000) DEFAULT NULL COMMENT '鉴权key',
-  `key_used` varchar(1000) CHARACTER SET utf8mb3 COLLATE utf8mb3_general_ci DEFAULT 'any' COMMENT 'key 用户',
-  `model` varchar(1000) CHARACTER SET utf8mb3 COLLATE utf8mb3_general_ci DEFAULT 'any' COMMENT 'key 用户',
+  `key_used` varchar(1000) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT 'any' COMMENT 'key 用户',
+  `model` varchar(1000) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT 'any' COMMENT 'key 用户',
   `req_token_cnt` int DEFAULT '0' COMMENT '请求使用的token数',
   `res_token_cnt` int DEFAULT '0' COMMENT '响应使用的token数',
   `status` tinyint NOT NULL DEFAULT '0',
   `create_time` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '生成时间',
   `update_time` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '更新时间',
+  `comment` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`record_pk`),
   UNIQUE KEY `idx_key` (`forward_key`) USING BTREE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
-CREATE TABLE IF NOT EXISTS `auth_openai_api_keys_v2` (
+CREATE TABLE `auth_forward_key_model_mapping` (
+  `record_pk` bigint NOT NULL AUTO_INCREMENT,
+  `forward_key` varchar(100) NOT NULL COMMENT '鉴权key',
+  `old_model` varchar(100) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL COMMENT '源model',
+  `new_model` varchar(100) CHARACTER SET utf8 COLLATE utf8_general_ci DEFAULT NULL COMMENT '新model',
+  `status` tinyint NOT NULL DEFAULT '0',
+  `create_time` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '生成时间',
+  `update_time` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '更新时间',
+  PRIMARY KEY (`record_pk`),
+  UNIQUE KEY `idx_key` (`forward_key`,`old_model`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+CREATE TABLE `auth_openai_api_keys_v2` (
   `record_pk` bigint NOT NULL AUTO_INCREMENT,
   `api_key` varchar(1000) NOT NULL COMMENT 'key',
   `key_type` varchar(1000) NOT NULL COMMENT 'key 用处类型',
@@ -36,21 +51,9 @@ CREATE TABLE IF NOT EXISTS `auth_openai_api_keys_v2` (
   `update_time` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '更新时间',
   PRIMARY KEY (`record_pk`),
   UNIQUE KEY `idx_key` (`api_key`) USING BTREE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
-CREATE TABLE IF NOT EXISTS `auth_forward_key_model_mapping` (
-  `record_pk` bigint NOT NULL AUTO_INCREMENT,
-  `forward_key` varchar(100) NOT NULL COMMENT '鉴权key',
-  `old_model` varchar(100) CHARACTER SET utf8mb3 COLLATE utf8mb3_general_ci COMMENT '源model',
-  `new_model` varchar(100) CHARACTER SET utf8mb3 COLLATE utf8mb3_general_ci COMMENT '新model',
-  `status` tinyint NOT NULL DEFAULT '0',
-  `create_time` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '生成时间',
-  `update_time` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '更新时间',
-  PRIMARY KEY (`record_pk`),
-  UNIQUE KEY `idx_key` (`forward_key`, `old_model`) USING BTREE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;
-
-CREATE TABLE IF NOT EXISTS `openai_relay_log_info` (
+CREATE TABLE `openai_relay_log_info` (
   `record_pk` bigint NOT NULL AUTO_INCREMENT,
   `forward_key` varchar(100) NOT NULL COMMENT '验证使用key',
   `req_type` varchar(100) DEFAULT '' COMMENT '请求类型',
@@ -63,12 +66,13 @@ CREATE TABLE IF NOT EXISTS `openai_relay_log_info` (
   `retry_times` tinyint DEFAULT '0' COMMENT '重试次数',
   `req_token` int DEFAULT '0' COMMENT '请求使用token数',
   `res_token` int DEFAULT '0' COMMENT '响应使用token数',
-  `log_info` text NOT NULL COMMENT '日志信息',
+  `log_info` longtext CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL COMMENT '日志信息',
   `create_time` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '生成时间',
-  PRIMARY KEY (`record_pk`)
+  PRIMARY KEY (`record_pk`),
+  KEY `idx` (`forward_key`,`create_time`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
-CREATE TABLE IF NOT EXISTS `openai_relay_log_info_error` (
+CREATE TABLE `openai_relay_log_info_error` (
   `record_pk` bigint NOT NULL AUTO_INCREMENT,
   `forward_key` varchar(100) NOT NULL COMMENT '验证使用key',
   `openai_key` varchar(100) NOT NULL COMMENT '请求使用key',
@@ -81,3 +85,13 @@ CREATE TABLE IF NOT EXISTS `openai_relay_log_info_error` (
   PRIMARY KEY (`record_pk`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
+
+BEGIN;
+-- random generate forward key
+INSERT INTO `auth_forward_api_keys_v2` (`forward_key`, `key_used`, `model`, `req_token_cnt`, `res_token_cnt`, `status`) VALUES ('fd-St6qwertPzE5EzsWk1pxN1hasdfglukIMqsVMzxcvbnvnYj', 'any', 'any', 0, 0, 0);
+
+-- todo insert azure openai key
+INSERT INTO `auth_openai_api_keys_v2` (`api_key`, `key_type`, `key_used`, `api_base`, `api_type`, `api_version`, `model`, `engine`)
+VALUES ('757b8f', 'chat', 'any', 'https://abcd.openai.azure.com/', 'azure', '2023-05-15', 'gpt-35-turbo', 'gpt-35-turbo');
+
+COMMIT;

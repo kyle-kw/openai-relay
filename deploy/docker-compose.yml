@@ -1,0 +1,186 @@
+version: '3'
+
+x-service-common:
+  &service-common
+  restart: always
+  deploy:
+    resources:
+      limits:
+        memory: 1G
+        cpus: "1"
+  logging:
+    driver: json-file
+    options:
+      max-size: 100m
+      max-file: '10'
+
+x-service-common-2:
+  &service-common-2
+  image: openai-relay:0.0.1
+  command: --workers=4
+  restart: always
+  environment:
+    SELECT_URL: mysql+aiomysql://root:Z8nVfAqXERe82VwJ@mysql-openai:3306/openai
+    REDIS_URL: redis://:SFEEiXxfVb1REc9e@redis-openai:6379/0
+    KAFKA_URI: kafka-openai:19092
+    KAFKA_OPENAI_TOPIC: openai-relay-v1
+    SENTRY_NSD: http://10e5f4cab0ce48e987348479934a0514@192.168.184.10:13390/29
+    LOG_PATH: logs
+    OPEN_SENTRY: "true"
+  volumes:
+    - ./logs:/app/logs
+
+services:
+  zookeeper-openai:
+    <<: *service-common
+    hostname: zookeeper-openai
+    container_name: zookeeper-openai
+    image: "confluentinc/cp-zookeeper:5.5.12"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: "2181"
+      CONFLUENT_SUPPORT_METRICS_ENABLE: "false"
+      ZOOKEEPER_LOG4J_ROOT_LOGLEVEL: "WARN"
+      ZOOKEEPER_TOOLS_LOG4J_LOGLEVEL: "WARN"
+      KAFKA_OPTS: "-Dzookeeper.4lw.commands.whitelist=ruok"
+    volumes:
+      # 手动挂载磁盘 第一次需要初始化
+      - "./data/data-zk/zookeeper:/var/lib/zookeeper/data"
+      - "./data/data-zk/zookeeper-log:/var/lib/zookeeper/log"
+    healthcheck:
+      interval: 10s
+      timeout: 30s
+      retries: 6
+      #start_period: 30s
+      test: ["CMD-SHELL", 'echo "ruok" | nc -w 2 -q 2 localhost 2181 | grep imok']
+
+  kafka-openai:
+    <<: *service-common
+    hostname: kafka-openai
+    container_name: kafka-openai
+    image: "confluentinc/cp-kafka:5.5.12"
+    ports:
+      - 19092:19092
+    environment:
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper-openai:2181"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka-openai:19092"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_OFFSETS_TOPIC_NUM_PARTITIONS: "1"
+      KAFKA_LOG_RETENTION_HOURS: "168"  # 日志保留时间 7天
+      KAFKA_LOG_RETENTION_BYTES: "189910292480"  # 270G 最大磁盘使用空间289910292480
+      KAFKA_MESSAGE_MAX_BYTES: "50000000" # 50MB or bust
+      KAFKA_MAX_REQUEST_SIZE: "50000000" # 50MB on requests apparently too
+      CONFLUENT_SUPPORT_METRICS_ENABLE: "false"
+      KAFKA_LOG4J_LOGGERS: "kafka1.cluster=WARN,kafka1.controller=WARN,kafka1.coordinator=WARN,kafka1.log=WARN,kafka1.server=WARN,kafka1.zookeeper=WARN,state.change.logger=WARN"
+      KAFKA_LOG4J_ROOT_LOGLEVEL: "WARN"
+      KAFKA_TOOLS_LOG4J_LOGLEVEL: "WARN"
+    volumes:
+      # 手动挂载磁盘 根据自身环境修改 第一次需要初始化
+      - "./data/data-kafka/data:/var/lib/kafka1/data"
+      - "./data/data-kafka/kafka1-log:/var/lib/kafka1/log"
+    healthcheck:
+      interval: 10s
+      timeout: 30s
+      retries: 6
+      #start_period: 30s
+      test: ["CMD-SHELL", "nc -z localhost 9092"]
+
+  kafka-cmak-openai:
+    <<: *service-common
+    image: hlebalbau/kafka-manager:stable
+    hostname: kafka-cmak-openai
+    container_name: kafka-cmak-openai
+    command:
+      - "-Dcmak.zkhosts=zookeeper-openai:2181"
+      - "-DbasicAuthentication.enabled=true"
+      - "-DbasicAuthentication.username=cmak_user"
+      - "-DbasicAuthentication.password=Zz_a421d3dcdsf"
+    volumes:
+      - "./data/data-cmak/logs:/logs"
+      - "./data/data-cmak/datalog:/datalog"
+      - "./data/data-cmak/data:/data"
+    ports:
+      - "19003:9000"
+
+  mysql-openai:
+    <<: *service-common
+    image: mysql:8
+    hostname: mysql-openai
+    container_name: mysql-openai
+    privileged: true
+    ports:
+      - "13306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: "Z8nVfAqXERe82VwJ"
+      MYSQL_DATABASE: "openai"
+      TZ: Asia/Shanghai
+    command:
+      --wait_timeout=31536000
+      --interactive_timeout=31536000
+      --max_connections=1000
+      --default-authentication-plugin=mysql_native_password
+    volumes:
+      #映射mysql的数据目录到宿主机，保存数据
+      - "./data/mysql/data/mysql/data:/var/lib/mysql"
+      - "./data/mysql/data/mysql/logs:/logs"
+
+  redis-openai:
+    <<: *service-common
+    image: redis:latest
+    hostname: redis-openai
+    container_name: redis-openai
+    restart: unless-stopped
+    command: redis-server /etc/redis/redis.conf --requirepass SFEEiXxfVb1REc9e --appendonly no
+    environment:
+      TZ: Asia/Shanghai
+      LANG: en_US.UTF-8
+    volumes:
+      - ./data/redis/data:/data
+      - ./data/redis/conf/redis.conf:/etc/redis/redis.conf
+    ports:
+      - "16379:6379"
+
+  ant-openai-relay-1:
+    <<: *service-common-2
+    hostname: ant-openai-relay-1
+    container_name: ant-openai-relay-1
+    ports:
+      - "18001:8000"
+
+  ant-openai-relay-2:
+    <<: *service-common-2
+    hostname: ant-openai-relay-2
+    container_name: ant-openai-relay-2
+    ports:
+      - "18002:8000"
+
+  ant-openai-relay-3:
+    <<: *service-common-2
+    hostname: ant-openai-relay-3
+    container_name: ant-openai-relay-3
+    ports:
+      - "18003:8000"
+
+  down-haproxy:
+    image: ccr.ccs.tencentyun.com/zhongbiao/haproxy:2.6.6-alpine3.16
+    container_name: openai-haproxy
+    hostname: openai-haproxy
+    ports:
+      - 13390:9099
+      - 38801:38801
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  openai-log-sync:
+    <<: *service-common
+    image: openai-log-sync:0.0.1
+    restart: always
+    environment:
+      INSERT_URL: mysql+pymysql://root:Z8nVfAqXERe82VwJ@mysql-openai:3306/openai
+      KAFKA_URI: kafka-openai:19092
+      KAFKA_OPENAI_TOPIC: openai-relay-v1
+      KAFKA_GROUP_ID: test-openai-v1
+      REDIS_URL: redis://:SFEEiXxfVb1REc9e@redis-openai:6379/0

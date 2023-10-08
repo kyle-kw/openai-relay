@@ -6,6 +6,6 @@ build:
 	docker build -f DockerfileSync . -t openai-log-sync:0.0.1
 
 init:
-	docker compose -f ./deploy/docker-compose-middleware.yml up -d
-	docker exec -i mysql8 mysql -u root -p123456 openai < ./deploy/init.sql
+	docker compose -f ./deploy/docker-compose.yml up -d
+	docker exec -i mysql-openai mysql -u root -pZ8nVfAqXERe82VwJ openai < ./init.sql
 
