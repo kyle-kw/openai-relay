@@ -11,19 +11,23 @@ openai-relay可以一键启动转发openai请求的服务。
 
 
 
-所支持的平台有：
+此项目兼容支持的平台有：
 
 1. openai官方以及第三方类openai。
 2. 微软（azure）。
 3. 百度文心一言。
-
+4. 华为盘古
+5. 阿里千问
+6. 讯飞星火
+7. 清华智谱
 
 
 项目特性：
 
 1. fastapi异步框架。
-2. redis缓存key。
-3. kafka收集请求信息，异步更新token，并保存日志信息。
+2. 实现超时异步双发。可以在超时后，开启另外一个协程，同时请求接口，保证第一次返回时间。
+3. redis缓存key，冷却池冷却key，以及请求token限流。
+4. kafka收集请求信息，异步更新token，并保存日志信息。
 
 
 
@@ -56,7 +60,7 @@ docker compose -f docker-compose-sync.yml up -d
 
 
 
-感谢项目：
+参考项目：
 
 [one-api: OpenAI 接口管理 & 分发系统](https://github.com/songquanpeng/one-api)
 

@@ -3,20 +3,18 @@
 # @Time   : 2023/8/16 17:59
 # @Author : huangkewei
 
-import time
-import httpx
 from urllib.parse import urljoin
 
 from app.utils.logs import logger
 from app.utils.magic_number import APIType
-from app.utils.exception import InternalException, RequestException
-from app.utils.huawei_sdk.pangu_api import pangu_distribute
+from app.utils.exception import InternalException
+from app.utils.platforms import pangu_distribute, zhipu_chat, qwen_chat, baidu_chat
 
 
 def main_distribute(key, req_params):
     api_type = judge_key_type(key)
 
-    if api_type == APIType.OpenAI:
+    if api_type in [APIType.OpenAI, APIType.Self]:
         return openai_distribute(key, req_params)
     elif api_type == APIType.Azure:
         return azure_distribute(key, req_params)
@@ -24,6 +22,12 @@ def main_distribute(key, req_params):
         return baidu_distribute(key, req_params)
     elif api_type == APIType.Huawei:
         return huawei_distribute(key, req_params)
+    elif api_type == APIType.Xunfei:
+        return xunfei_distribute(key, req_params)
+    elif api_type == APIType.Qinghua:
+        return qinghua_distribute(key, req_params)
+    elif api_type == APIType.Ali:
+        return ali_distribute(key, req_params)
 
 
 def judge_key_type(key) -> APIType:
@@ -36,6 +40,14 @@ def judge_key_type(key) -> APIType:
         return APIType.Baidu
     elif key_type == 'huawei':
         return APIType.Huawei
+    elif key_type == 'xunfei':
+        return APIType.Xunfei
+    elif key_type == 'qinghua':
+        return APIType.Qinghua
+    elif key_type == 'ali':
+        return APIType.Ali
+    elif key_type == 'self':
+        return APIType.Self
 
     raise InternalException(detail='api类型异常！')
 
@@ -48,6 +60,14 @@ def openai_distribute(key: dict, req_params: dict):
     url_path: str = req_params.get('url_path')
     body = req_params.get('body')
     body['model'] = model
+
+    if url_path.startswith('/v1//'):
+        url_path = '/v1/' + url_path[5:]
+
+    if (('max_tokens' not in body or not body['max_tokens']) and
+            model in ['jfh-bot-32k-chat', 'jfh-coder-34b',
+                      'jfh-bot-13b-chat', 'jfh-bot-7b']):
+        body['max_tokens'] = 500
 
     full_url = urljoin(api_base, url_path)
 
@@ -104,123 +124,11 @@ def azure_distribute(key, req_params):
 def baidu_distribute(key, req_params):
     api_key = key.get('api_key')
     model = key.get('model')
+    params = req_params.get('body')
 
-    access_keys = api_key.split('/')
-    access_token = get_access_token(*access_keys)
-
-    body = req_params.get('body')
-
-    if model == 'ERNIE-Bot-turbo':
-        url = 'https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/eb-instant'  # ERNIE-Bot-turbo
-    elif model == 'ERNIE-Bot':
-        url = 'https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/completions'  # ERNIE-Bot
-    else:  # if model == 'BLOOMZ-7B':
-        url = 'https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/bloomz_7b1'  # BLOOMZ-7B
-
-    # 目前百度支持的参数
-    allow_keys = ['messages', 'temperature', 'top_p', 'penalty_score', 'stream', 'user_id']
-    data_new = {
-        k: v for k, v in body.items()
-        if k in allow_keys
-    }
-
-    # 百度msg需要处理
-    temperature = data_new.get('temperature')
-    if temperature is not None and str(temperature) == '0.0':
-        data_new['temperature'] = 0.1
-
-    messages: list = data_new.get('messages')
-    if not messages:
-        raise RequestException(detail='baidu 没有可用信息!')
-
-    if messages[0]['role'] == 'system':
-        messages[1]['content'] = messages[0]['content'] + '\n' + messages[1]['content']
-        messages.pop(0)
-
-    messages_new = []
-    for msg in messages:
-        if not messages_new:
-            messages_new.append(msg)
-            continue
-        if msg['role'] == messages_new[-1]['role']:
-            messages_new[-1]['content'] += msg['content']
-        else:
-            messages_new.append(msg)
-
-    if len(messages_new) % 2 == 0:
-        raise RequestException(detail='baidu 信息个数必须为奇数。')
-
-    data_new['messages'] = messages_new
-
-    params = {
-        'access_token': access_token
-    }
-    headers = {
-        'Content-Type': 'application/json'
-    }
-    req_new = {
-        'method': 'POST',
-        'url': url,
-        'params': params,
-        'headers': headers,
-        'json': data_new,
-    }
+    req_new = baidu_chat(api_key, model, params)
 
     return req_new
-
-
-access_token_cache = {
-    'last_time': 0.0,
-    'access_token': ''
-}
-
-
-def cache_decorator(cache_time=300):
-    """
-    缓存修饰器
-    :param cache_time: 缓存时间，默认300s
-
-    :return:
-    """
-
-    def _decorator(func):
-        def _wrapper(*args, **kwargs):
-            last_time = access_token_cache.get('last_time')
-            access_token = access_token_cache.get('access_token')
-
-            if not access_token or time.time()-last_time > cache_time:
-                access_token = access_token_cache['access_token'] = func(*args, **kwargs)
-                access_token_cache['last_time'] = time.time()
-
-            return access_token
-
-        return _wrapper
-
-    return _decorator
-
-
-@cache_decorator()
-def get_access_token(grant_type, client_id, client_secret) -> str:
-    """
-    使用 API Key，Secret Key 获取access_token
-    """
-
-    url = "https://aip.baidubce.com/oauth/2.0/token"
-
-    params = {
-        'grant_type': grant_type,
-        'client_id': client_id,  # API Key
-        'client_secret': client_secret,  # Secret Key
-    }
-
-    headers = {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-    }
-
-    response = httpx.request("POST", url, headers=headers, params=params)
-
-    return response.json().get("access_token")
 
 
 def huawei_distribute(key, req_params):
@@ -241,10 +149,12 @@ def huawei_distribute(key, req_params):
             k: v for k, v in body.items()
             if k in allow_keys
         }
+        if 'temperature' in data_new:
+            data_new['temperature'] = min(max(data_new['temperature'], 0.1), 1)
 
         data_new['prompt'] = '\n'.join([d['content'] for d in body['messages']])
         if 'max_tokens' in data_new:
-            data_new['max_tokens'] = 2000 if data_new['max_tokens'] > 2000 else data_new['max_tokens']
+            data_new['max_tokens'] = min(max(data_new['max_tokens'], 1000), 4096)
 
     elif model == 'pangu-chat':
         url_path = f'/v1/{project_id}/deployments/{deployment_id}/chat/completions'
@@ -257,10 +167,115 @@ def huawei_distribute(key, req_params):
             k: v for k, v in body.items()
             if k in allow_keys
         }
+        if 'temperature' in data_new:
+            data_new['temperature'] = min(max(data_new['temperature'], 0.1), 1)
 
         if 'max_tokens' in data_new:
-            data_new['max_tokens'] = 2000 if data_new['max_tokens'] > 2000 else data_new['max_tokens']
+            data_new['max_tokens'] = min(max(data_new['max_tokens'], 1000), 2000)
 
     req_new = pangu_distribute(ak, sk, url, data_new)
+
+    return req_new
+
+
+def xunfei_distribute(key, req_params):
+    api_key = key.get('api_key')
+    model = key.get('model')
+    appid, api_secret, api_key_ = api_key.split('/')
+
+    if model == 'general':
+        spark_url = 'wss://spark-api.xf-yun.com/v1.1/chat'
+    elif model == 'generalv2':
+        spark_url = 'wss://spark-api.xf-yun.com/v2.1/chat'
+    else:
+        spark_url = ''
+
+    body = req_params.get('body')
+    question = body.get('messages')
+
+    if question[0]['role'] == 'system':
+        if len(question) == 1:
+            question.append({'role': 'user', 'content': ''})
+        question[1]['content'] = question[0]['content'] + '\n' + question[1]['content']
+        question.pop(0)
+
+    allow_keys = ['random_threshold', 'temperature', 'max_tokens', 'auditing', 'top_k', 'chat_id']
+    chat_param = {
+        k: v for k, v in body.items()
+        if k in allow_keys
+    }
+    if 'max_tokens' in chat_param:
+        chat_param['max_tokens'] = min(max(chat_param['max_tokens'], 1000), 4096)
+
+    if 'temperature' in chat_param:
+        chat_param['temperature'] = min(max(chat_param['temperature'], 0.1), 1)
+
+    ws_new = {
+        'appid': appid,
+        'api_key': api_key_,
+        'api_secret': api_secret,
+        'spark_url': spark_url,
+        'domain': model,
+        'question': question,
+        'chat_param': chat_param,
+    }
+
+    return ws_new
+
+
+def qinghua_distribute(key, req_params):
+    api_key = key.get('api_key')
+    model = key.get('model')
+
+    body = req_params.get('body')
+    messages = body.get('messages')
+
+    if messages[0]['role'] == 'system':
+        if len(messages) == 1:
+            messages.append({'role': 'user', 'content': ''})
+        messages[1]['content'] = messages[0]['content'] + '\n' + messages[1]['content']
+        messages.pop(0)
+
+    allow_keys = ['prompt', 'temperature', 'top_p', 'request_id', 'incremental']
+    chat_param = {
+        k: v for k, v in body.items()
+        if k in allow_keys
+    }
+    chat_param['prompt'] = messages
+
+    if 'temperature' in chat_param:
+        chat_param['temperature'] = min(max(chat_param['temperature'], 0.1), 1)
+
+    if 'top_p' in chat_param:
+        chat_param['top_p'] = min(max(chat_param['top_p'], 0.1), 0.9)
+
+    req_new = zhipu_chat(api_key, model, chat_param)
+
+    return req_new
+
+
+def ali_distribute(key, req_params):
+    api_key = key.get('api_key')
+    model = key.get('model')
+
+    body = req_params.get('body')
+    messages = body.get('messages')
+
+    allow_keys = ['temperature', 'seed', 'stream', 'top_k', 'enable_search', 'result_format']
+    chat_param = {
+        k: v for k, v in body.items()
+        if k in allow_keys
+    }
+
+    if 'temperature' in chat_param:
+        chat_param['temperature'] = min(max(chat_param['temperature'], 0.01), 1)
+
+    if 'top_p' in chat_param:
+        chat_param['top_p'] = min(max(chat_param['top_p'], 1), 100)
+
+    if 'seed' in chat_param:
+        chat_param['seed'] = min(max(chat_param['seed'], 1), 65535)
+
+    req_new = qwen_chat(api_key, messages, model, chat_param)
 
     return req_new

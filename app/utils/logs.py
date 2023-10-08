@@ -27,7 +27,6 @@ formatter = logging.Formatter(log_format)
 # 将格式化器添加到处理程序
 file_handler.setFormatter(formatter)
 
-# 创建终端打印处理器
 console_handler = logging.StreamHandler()
 console_handler.setFormatter(formatter)
 

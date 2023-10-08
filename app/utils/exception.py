@@ -51,6 +51,17 @@ class TimeoutException(HTTPException):
         super().__init__(status_code=status_code, detail=detail, headers=headers)
 
 
+class TokenLimitException(HTTPException):
+    def __init__(
+        self,
+        detail: Any = None,
+        headers: Optional[Dict[str, str]] = None,
+    ):
+        status_code = status.HTTP_429_TOO_MANY_REQUESTS
+        detail = detail or 'token限流触发！'
+        super().__init__(status_code=status_code, detail=detail, headers=headers)
+
+
 class OtherException(HTTPException):
     def __init__(
         self,

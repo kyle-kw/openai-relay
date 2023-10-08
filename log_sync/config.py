@@ -18,9 +18,11 @@ def get_env(env_name, default=None, required=False, arg_formatter=None):
     return rv
 
 
-INSERT_URL = get_env("INSERT_URL", "mysql+pymysql://root:123456@localhost:3308/openai")
+INSERT_URL = get_env("INSERT_URL", "mysql+pymysql://root:q1w2e3r4UMYSQL@130.252.27.39:3366/test")
 
-KAFKA_URI = get_env("KAFKA_URI", "localhost:9092")
-KAFKA_OPENAI_TOPIC = get_env("KAFKA_OPENAI_TOPIC", "openai-relay-v1-test")
-KAFKA_GROUP_ID = get_env("KAFKA_GROUP_ID", "test_v1")
+KAFKA_URI = get_env("KAFKA_URI", "kafka-test:9092")
+KAFKA_OPENAI_TOPIC = get_env("KAFKA_OPENAI_TOPIC", "openai-relay-v2-test")
+KAFKA_GROUP_ID = get_env("KAFKA_GROUP_ID", "test1")
+
+REDIS_URL = get_env("REDIS_URL", "redis://@130.252.27.39:6379/1")
 

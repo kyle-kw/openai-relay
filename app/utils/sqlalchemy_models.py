@@ -3,8 +3,6 @@
 # @Time   : 2023/8/15 15:32
 # @Author : huangkewei
 
-# sqlalchemy 相关model，用于数据库查询
-
 from sqlalchemy import BigInteger, Column, Integer, String, text
 from sqlalchemy.dialects.mysql import DATETIME, TINYINT, VARCHAR
 from sqlalchemy.ext.declarative import declarative_base

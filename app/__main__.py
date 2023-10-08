@@ -10,8 +10,13 @@ class Cli:
         port=8000,
         workers=1,
     ):
-        """
-        Run forwarding serve.
+        """Run forwarding serve.
+
+        Parameters
+        ----------
+
+        port: int, default 8000
+        workers: int, 1
         """
 
         uvicorn.run(

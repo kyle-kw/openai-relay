@@ -4,7 +4,7 @@
 # @Author : huangkewei
 
 from sqlalchemy import BigInteger, Column, Integer, String, text, Text, Float
-from sqlalchemy.dialects.mysql import DATETIME, TINYINT, VARCHAR
+from sqlalchemy.dialects.mysql import DATETIME, TINYINT, VARCHAR, LONGTEXT
 from sqlalchemy.ext.declarative import declarative_base
 
 Base = declarative_base()
@@ -62,7 +62,7 @@ class OpenaiRelayLogInfo(Base):
     retry_times = Column(TINYINT, server_default=text("'0'"), comment='重试次数')
     req_token = Column(Integer, server_default=text("'0'"), comment='请求使用token数')
     res_token = Column(Integer, server_default=text("'0'"), comment='响应使用token数')
-    log_info = Column(Text, nullable=False, comment='日志信息')
+    log_info = Column(LONGTEXT, nullable=False, comment='日志信息')
     create_time = Column(DATETIME(fsp=6), nullable=False, server_default=text("CURRENT_TIMESTAMP(6)"), comment='生成时间')
 
 

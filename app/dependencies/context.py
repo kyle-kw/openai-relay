@@ -28,6 +28,10 @@ class OpenaiContext:
 
         self.retry_times = 0
 
+        self.timeout = 10
+
+        self.double_run_task = 0
+
 
 def get_context():
     return OpenaiContext()

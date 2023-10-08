@@ -8,16 +8,17 @@ import base64
 import orjson
 import tiktoken
 import numpy as np
-from sqlalchemy import select
 from orjson import JSONDecodeError
+from sqlalchemy import select
 from httpx._decoders import LineDecoder
 from data_stream_kit import SessionContextManager, sqlalchemy_data_commit, session, \
     sqlalchemy_result_format, sqlalchemy_update_data_by_case
 
-from log_sync.config import INSERT_URL
 from log_sync.models import AuthOpenaiApiKeysV2, AuthForwardApiKeysV2, OpenaiRelayLogInfo, \
     OpenaiRelayLogInfoError
-
+from log_sync.config import INSERT_URL
+from log_sync.redis_tools import add_all_redis_token
+from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 db_session = SessionContextManager(url=INSERT_URL, alias='insert')
@@ -32,7 +33,7 @@ def token_count(text, model_name='gpt-3.5-turbo'):
     :return:
     """
     if not text:
-        return
+        return 0
 
     enc = tiktoken.encoding_for_model(model_name)
 
@@ -160,14 +161,19 @@ def insert_error_log_info(error_data_lst):
     logger.info(f'添加错误日志数据状态：{stats}')
 
 
-def parse_chat_completions(bytes_: bytes):
+def parse_chat_completions(bytes_):
     """
     解析chat接口返回的数据，兼容流式以及非流式
 
     :param bytes_:
     :return:
     """
-    txt_lines = decoder.decode(bytes_.decode("utf-8"))
+    if isinstance(bytes_, bytes):
+        txt_lines = decoder.decode(bytes_.decode("utf-8"))
+    else:
+        txt_lines = decoder.decode(bytes_)
+    if not txt_lines:
+        return {}
     line0 = txt_lines[0]
     target_info = dict()
     _start_token = "data: "
@@ -233,38 +239,79 @@ def parse_embeddings(bytes_: bytes):
 def deal_error_log(one):
     error = one['error']
 
-    ctx: dict = one['ctx']
+    ctx: dict = orjson.loads(one['ctx'])
     forward_key = ctx['forward_key']
     openai_key = ctx['openai_key']
-    req_type = ''
     model_name = ctx['model_name']
 
     log_info = orjson.dumps(ctx).decode()
 
     req_params = ctx['req_params']
-    req_content = []
-    if 'json' in req_params:
-        req_content = req_params['json']['messages']
-    elif 'data' in req_params:
-        req_content = req_params['json']['messages']
 
-    req_prompt = '\n'.join([d['content'] for d in req_content])
+    req_type = ''
+    req_text = ''
 
-    url = req_params.get('url')
-    if 'chat/completions' in url \
-            or 'aip.baidubce.com' in url \
-            or 'huaweicloud.com' in url:
+    if model_name in ['ERNIE-Bot', 'ERNIE-Bot-turbo', 'BLOOMZ-7B']:
         req_type = 'chat'
 
-    elif 'embeddings' in url:
+        req_data = req_params.get('json') or {}
+        req_content = req_data.get('messages') or []
+        req_text = '\n'.join([d['content'] for d in req_content])
+
+    elif model_name in ['pangu-chat', 'pangu-text']:
+        req_type = 'chat'
+        prompt = req_params.get('prompt')
+        if prompt is not None:
+            req_text = prompt
+        else:
+            req_data = req_params.get('data') or '{}'
+            req_data = orjson.loads(req_data)
+            req_content = req_data.get('messages') or []
+            req_text = '\n'.join([d['content'] for d in req_content])
+
+    elif model_name in ['general', 'generalv2']:
+        req_type = 'chat'
+        question = req_params.get('question') or []
+        req_text = '\n'.join([d['content'] for d in question])
+
+    elif model_name in ['chatglm_pro', 'chatglm_std',
+                        'chatglm_lite', 'chatglm_lite_32k']:
+        req_type = 'chat'
+        req_data = req_params.get('json') or {}
+        req_content = req_data.get('prompt') or []
+        req_text = '\n'.join([d['content'] for d in req_content])
+
+    elif model_name in ['gpt-35-turbo', 'gpt-35-turbo-16k',
+                        'gpt-3.5-turbo', 'gpt-3.5-turbo-16k',
+                        'jfh-bot-32k-chat', 'jfh-coder-34b',
+                        'jfh-bot-13b-chat', 'jfh-bot-7b']:
+        req_type = 'chat'
+
+        req_data = req_params.get('json')
+        req_content = req_data.get('messages')
+        req_text = '\n'.join([d['content'] for d in req_content])
+
+    elif model_name in ['qwen-turbo', 'qwen-plus']:
+        req_type = 'chat'
+        question = req_params.get('input').get('messages') or []
+        req_text = '\n'.join([d['content'] for d in question])
+
+    elif model_name in ['text-embedding-ada-002']:
         req_type = 'embedding'
+
+    else:
+        req_type = 'chat'
+
+        req_data = req_params.get('json')
+        req_content = req_data.get('messages')
+        req_text = '\n'.join([d['content'] for d in req_content])
 
     error_log = {
         'forward_key': forward_key,
         'openai_key': openai_key,
         'req_type': req_type,
         'model_name': model_name,
-        'req_prompt': req_prompt,
+        'req_prompt': req_text,
         'log_info': log_info,
         'error': error,
     }
@@ -281,14 +328,14 @@ def _deal_log_info(log_lst):
     if not log_lst:
         return
 
-    update_openai = []
-    update_forward = []
+    update_openai = defaultdict(list)
+    update_forward = defaultdict(list)
     log_data = []
     error_log_data = []
 
     for one in log_lst:
         try:
-            if one.get('error'):
+            if one.get('error') is not None:
                 # 若存在error，错误日志
                 error_log = deal_error_log(one)
                 error_log_data.append(error_log)
@@ -297,47 +344,97 @@ def _deal_log_info(log_lst):
             forward_key = one['forward_key']
             openai_key = one['openai_key']
             req_params = one['req_params']
+            model_name = one['model_name']
             res_content = one['res_content'].encode()
-
-            url = req_params.get('url')
 
             req_token_cnt = 0
             res_token_cnt = 0
             req_type = ''
-            if 'chat/completions' in url or 'aip.baidubce.com' in url:
+            res_text = ''
+            req_text = ''
+
+            if model_name in ['ERNIE-Bot', 'ERNIE-Bot-turbo', 'BLOOMZ-7B']:
                 req_type = 'chat'
                 res_content = parse_chat_completions(res_content)
-                res_text = res_content['content']
+                res_text = res_content.get('content', '')
+
+                req_data = req_params.get('json') or {}
+                req_content = req_data.get('messages') or []
+                req_text = '\n'.join([d['content'] for d in req_content])
+
+                res_token_cnt = token_count(res_text)
+                req_token_cnt = token_count(req_text)
+
+            elif model_name in ['pangu-chat', 'pangu-text']:
+                req_type = 'chat'
+                res_content = parse_chat_completions(res_content)
+                res_text = res_content.get('content', '')
+
+                req_data = req_params.get('data') or '{}'
+                req_data = orjson.loads(req_data)
+                prompt = req_data.get('prompt')
+                if prompt is not None:
+                    req_text = prompt
+                else:
+                    req_content = req_data.get('messages') or []
+                    req_text = '\n'.join([d['content'] for d in req_content])
+
+                res_token_cnt = token_count(res_text)
+                req_token_cnt = token_count(req_text)
+
+            elif model_name in ['general', 'generalv2']:
+                req_type = 'chat'
+                res_content = parse_chat_completions(res_content)
+                res_text = res_content.get('content', '')
+
+                question = req_params.get('question') or []
+                req_text = '\n'.join([d['content'] for d in question])
+
+                res_token_cnt = token_count(res_text)
+                req_token_cnt = token_count(req_text)
+
+            elif model_name in ['chatglm_pro', 'chatglm_std',
+                                'chatglm_lite', 'chatglm_lite_32k']:
+                req_type = 'chat'
+                res_content = parse_chat_completions(res_content)
+                res_text = res_content.get('content', '')
+
+                req_data = req_params.get('json') or {}
+                req_content = req_data.get('prompt') or []
+                req_text = '\n'.join([d['content'] for d in req_content])
+
+                res_token_cnt = token_count(res_text)
+                req_token_cnt = token_count(req_text)
+
+            elif model_name in ['gpt-35-turbo', 'gpt-35-turbo-16k',
+                                'gpt-3.5-turbo', 'gpt-3.5-turbo-16k',
+                                'jfh-bot-32k-chat', 'jfh-coder-34b',
+                                'jfh-bot-13b-chat', 'jfh-bot-7b']:
+                req_type = 'chat'
+                res_content = parse_chat_completions(res_content)
+                res_text = res_content.get('content', '')
 
                 req_data = req_params.get('json')
                 req_content = req_data.get('messages')
                 req_text = '\n'.join([d['content'] for d in req_content])
 
-                if res_content['usage']:
-                    res_token_cnt = res_content['usage']['completion_tokens']
-                    req_token_cnt = res_content['usage']['prompt_tokens']
-                else:
-                    res_token_cnt = token_count(res_text)
-                    req_token_cnt = token_count(req_text)
+                res_token_cnt = token_count(res_text)
+                req_token_cnt = token_count(req_text)
 
-            elif 'huaweicloud.com' in url:
+            elif model_name in ['qwen-turbo', 'qwen-plus']:
                 req_type = 'chat'
                 res_content = parse_chat_completions(res_content)
-                res_text = res_content['content']
+                res_text = res_content.get('content', '')
 
-                req_data = req_params.get('data')
-                req_data = orjson.loads(req_data)
-                req_content = req_data.get('messages')
-                if req_content:
-                    req_text = '\n'.join([d['content'] for d in req_content])
-                else:
-                    req_text = req_data.get('prompt', '')
+                question = req_params.get('input').get('messages') or []
+                req_text = '\n'.join([d['content'] for d in question])
 
                 res_token_cnt = token_count(res_text)
                 req_token_cnt = token_count(req_text)
 
-            elif 'embeddings' in url:
+            elif model_name in ['text-embedding-ada-002']:
                 req_type = 'embedding'
+                req_data = req_params.get('json')
                 input_text = req_data.get('input')
 
                 if isinstance(input_text, list) and isinstance(input_text[0], list):
@@ -350,41 +447,39 @@ def _deal_log_info(log_lst):
 
                 res_token_cnt = 0
 
-            update_openai.append({
-                'api_key': openai_key,
-                'req_token_cnt': req_token_cnt,
-                'res_token_cnt': res_token_cnt,
-            })
+            else:
+                req_type = 'chat'
+                res_content = parse_chat_completions(res_content)
+                res_text = res_content.get('content', '')
 
-            update_forward.append({
-                'forward_key': forward_key,
-                'req_token_cnt': req_token_cnt,
-                'res_token_cnt': res_token_cnt,
-            })
+                req_data = req_params.get('json')
+                req_content = req_data.get('messages')
+                req_text = '\n'.join([d['content'] for d in req_content])
+
+                res_token_cnt = token_count(res_text)
+                req_token_cnt = token_count(req_text)
 
             deal_time = one['deal_time']
             first_time = one['first_time']
             all_time = one['all_time']
             retry_times = one['retry_times']
 
+            update_openai[openai_key].append((req_token_cnt, res_token_cnt, first_time))
+            update_forward[forward_key].append((req_token_cnt, res_token_cnt, first_time))
+
             first_return_time = round(first_time - deal_time, 4)
             all_return_time = round(all_time - deal_time, 4)
             return_rate = 0.0
-            req_prompt = ''
-            res_content = ''
+
             if req_type == 'chat':
                 return_rate = round(len(res_text) / all_return_time, 4)
-                req_prompt = req_text
-                res_content = res_text
-
-            model_name = one['model_name']
 
             log_data.append({
                 'forward_key': forward_key,
                 'req_type': req_type,
                 'model_name': model_name,
-                'req_prompt': req_prompt,
-                'res_content': res_content,
+                'req_prompt': req_text,
+                'res_content': res_text,
                 'first_time': first_return_time,
                 'all_time': all_return_time,
                 'return_rate': return_rate,
@@ -396,10 +491,35 @@ def _deal_log_info(log_lst):
         except Exception as e:
             logger.exception(e)
 
+    update_openai_all = []
+    for openai_key, token_lst in update_openai.items():
+        update_openai_all.append({
+            'api_key': openai_key,
+            'req_token_cnt': sum([d[0] for d in token_lst]),
+            'res_token_cnt': sum([d[1] for d in token_lst]),
+        })
+
+    update_forward_all = []
+    for forward_key, token_lst in update_forward.items():
+        update_forward_all.append({
+            'forward_key': forward_key,
+            'req_token_cnt': sum([d[0] for d in token_lst]),
+            'res_token_cnt': sum([d[1] for d in token_lst]),
+        })
+
+    set_token_limit = defaultdict(dict)
+    for openai_key, token_lst in update_openai.items():
+        for one_record in token_lst:
+            set_token_limit[openai_key][str(int(one_record[2]))] = one_record[0] + one_record[1]
+    for forward_key, token_lst in update_forward.items():
+        for one_record in token_lst:
+            set_token_limit[forward_key][str(int(one_record[2]))] = one_record[0] + one_record[1]
+
+    add_all_redis_token(set_token_limit)
     insert_log_info(log_data)
     insert_error_log_info(error_log_data)
-    update_openai_data_token(update_openai)
-    update_forward_data_token(update_forward)
+    update_openai_data_token(update_openai_all)
+    update_forward_data_token(update_forward_all)
 
     logger.info('处理完成。')
 

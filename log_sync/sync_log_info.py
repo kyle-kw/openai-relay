@@ -6,9 +6,10 @@
 import orjson
 import logging
 import warnings
-from data_stream_kit import KafkaConsumer
 
+from data_stream_kit import KafkaConsumer
 from log_sync.sync_tool import deal_log_info
+
 from log_sync.config import KAFKA_URI, KAFKA_OPENAI_TOPIC, KAFKA_GROUP_ID
 
 logging.basicConfig(

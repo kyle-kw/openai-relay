@@ -13,9 +13,9 @@ from app.utils.logs import logger
 from app.utils.conf import SELECT_URL
 from app.utils.sqlalchemy_models import AuthOpenaiApiKeysV2, AuthForwardApiKeysV2, \
     AuthForwardKeyModelMapping
-from app.utils.exception import AuthException, RequestException
+from app.utils.exception import AuthException, RequestException, TokenLimitException
 from app.utils.redis_tools import get_openai_key, add_key_to_openai_pool, get_forward_key, \
-    add_key_to_forward_pool
+    add_key_to_forward_pool, limit_keys_token
 
 Session = AIOSessionManager(url=SELECT_URL)
 
@@ -177,3 +177,16 @@ async def auth_forward(forward_key):
         raise AuthException(detail='验证forward key失败!')
 
     return key
+
+
+async def auth_openai_token_limit(key):
+    # 验证key有没有限流
+
+    api_key = key['api_key']
+    limit_token = key['limit_token'] * 1000
+
+    status = await limit_keys_token(api_key, limit_token)
+
+    if status == 0:
+        raise TokenLimitException()
+
