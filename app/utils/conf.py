@@ -18,20 +18,18 @@ def get_env(env_name, default=None, required=False, arg_formatter=None):
     return rv
 
 
-# SELECT_URL = get_env("SELECT_URL", "mysql+aiomysql://root:q1w2e3r4UMYSQL@130.252.27.39:3366/test")
-# REDIS_URL = get_env("REDIS_URL", "redis://@130.252.27.39:6379/1")
+SELECT_URL = get_env("SELECT_URL", "mysql+aiomysql://root:123456@localhost:3306/openai")
+REDIS_URL = get_env("REDIS_URL", "redis://:123456@localhost:6379/1")
 
-SELECT_URL = get_env("SELECT_URL", "mysql+aiomysql://dev_user:6e7%40003%5E%25168acE@172.21.0.76:3306/jointpilot")
-REDIS_URL = get_env("REDIS_URL", "redis://:Pwd_dDV6FqyxQ6q@172.21.16.15:6380/6")
+KAFKA_URI = get_env("KAFKA_URI", "localhost:9092")
+KAFKA_OPENAI_TOPIC = get_env("KAFKA_OPENAI_TOPIC", "openai-relay-v1-test")
 
-KAFKA_URI = get_env("KAFKA_URI", "kafka-test:9092")
-KAFKA_OPENAI_TOPIC = get_env("KAFKA_OPENAI_TOPIC", "openai-relay-v2-test")
 
 LOG_LEVEL = get_env("LOG_LEVEL", "INFO")
 LOG_PATH = get_env("LOG_PATH", "logs")
 
 OPEN_SENTRY = get_env("OPEN_SENTRY", "false")
-SENTRY_NSD = get_env("SENTRY_NSD", "http://56ea72c9768c4528ba32a017a75ae207@172.21.0.33:9000/27")
+SENTRY_NSD = get_env("SENTRY_NSD", "")
 if OPEN_SENTRY.lower() == 'true':
     OPEN_SENTRY = True
 else:
