@@ -113,33 +113,4 @@ async def xunfei_chat(appid, api_key, api_secret, spark_url, domain, question, c
                 raise e
 
 
-async def spark_test():
-    """
-    todo key 补充
-    """
-    appid = "5f5"
-    api_secret = "M2U0M2ZiZTQx"
-    api_key = "40c9fd4e1c1421"
 
-    domain = "general"   # v1.5版本
-    spark_url = "wss://spark-api.xf-yun.com/v1.1/chat"  # v1.5环境的地址
-
-    # domain = "generalv2"  # v2.0版本
-    # spark_url = "wss://spark-api.xf-yun.com/v2.1/chat"  # v2.0环境的地址
-
-    question = [
-        {'role': 'user', 'content': '你是谁？'},
-    ]
-    aio_gen = xunfei_chat(appid, api_key, api_secret, spark_url, domain, question)
-
-    async for mag in aio_gen:
-        print(mag)
-        data = json.loads(mag)
-        choices = data["payload"]["choices"]
-        content = choices["text"][0]["content"]
-        print(content, end="")
-    print()
-
-
-if __name__ == "__main__":
-    asyncio.run(spark_test())

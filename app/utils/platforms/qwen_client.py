@@ -88,34 +88,3 @@ def ali_api_res_to_openai(res, idx):
     idx = len(content)
     return b'data: ' + orjson.dumps(openai_res) + b'\n', idx
 
-
-async def chat_test():
-    """
-    todo key 补充
-    """
-    api_key = 'sk-1994'
-    msg = [
-        {"role": "user", "content": "你是谁？"}
-    ]
-    model = 'qwen-turbo'
-    req_params = qwen_chat(api_key, msg, model)
-
-    req = httpx.Request(**req_params)
-    client = httpx.AsyncClient(http1=True, http2=False)
-    r = await client.send(req, stream=True)
-    i = 0
-    async for chunk in r.aiter_bytes():
-        try:
-            res, i = ali_api_res_to_openai(chunk, i)
-            res_ = json.loads(res.decode()[len('data:'):])
-            print(res_['choices'][0]['delta']['content'], end='')
-
-        except Exception as e:
-            print(e)
-            print(chunk)
-
-    print()
-
-
-if __name__ == '__main__':
-    asyncio.run(chat_test())
